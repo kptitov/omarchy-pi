@@ -42,7 +42,7 @@ docker run --name omarchy-rootfs --platform linux/arm64 \
   -v "$ROOT/config:/config:ro" \
   -v "$OMARCHY:/omarchy:ro" \
   -v "$WORK/out:/pkgs:ro" \
-  -e VARIANT="$VARIANT" \
+  -e VARIANT="$VARIANT" -e ALLOW_SSH="${ALLOW_SSH:-}" \
   alarm-work bash /scripts/build-rootfs.sh
 
 echo "### Stage 2: export rootfs"
