@@ -55,3 +55,6 @@ assert_grep 'omarchy-pi-expand-root' "$RF" "first-boot root expansion is install
 
 # Release images keep Omarchy's closed-by-default firewall.
 assert_grep 'ALLOW_SSH' "$RF" "SSH exposure is explicit and variant-gated"
+
+# A known default password plus SSH open is a login for anyone on the LAN.
+assert_grep 'PasswordAuthentication no' "$RF" "SSH is key-only when a key is installed"

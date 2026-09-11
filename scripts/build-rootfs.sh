@@ -159,6 +159,9 @@ if [ -f /keys/id_omarchy.pub ]; then
   echo "==> Installing smoke-test SSH key"
   install -d -m 700 -o "$USERNAME" -g "$USERNAME" "/home/$USERNAME/.ssh"
   install -m 600 -o "$USERNAME" -g "$USERNAME" /keys/id_omarchy.pub "/home/$USERNAME/.ssh/authorized_keys"
+  # With a key installed nothing needs passwords over SSH, and the default user's
+  # password is documented. sshd takes the first value it reads, so 10- wins.
+  echo "PasswordAuthentication no" > /etc/ssh/sshd_config.d/10-omarchy-pi.conf
 fi
 
 # Be explicit about booting to a desktop. sddm enables itself through an
