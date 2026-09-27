@@ -10,6 +10,15 @@ set -uo pipefail
 cd "$(dirname "$0")/.."
 IMG=work/out/omarchy-pi.img; X=work/pi-boot; mkdir -p "$X"; SERIAL="$X/serial.log"
 TIMEOUT="${TIMEOUT:-900}"
+DOCKER="${DOCKER:-$(command -v docker || command -v podman || true)}"
+docker() { "$DOCKER" "$@"; }
+
+# QEMU's SD card model only accepts power-of-two sizes. Boot a padded copy
+# (an APFS clone costs nothing) so the real image keeps its size.
+SD="$X/sd.img"; rm -f "$SD"
+cp -c "$IMG" "$SD" 2>/dev/null || cp "$IMG" "$SD"
+bytes=$(stat -f%z "$SD" 2>/dev/null || stat -c%s "$SD"); pow=1; while (( pow < bytes )); do pow=$((pow*2)); done
+truncate -s "$pow" "$SD"
 
 echo "==> Extracting kernel, initramfs, DTB and cmdline from the image's boot partition"
 docker run --rm --platform linux/arm64 -v "$PWD/work:/w" alarm-work bash -c '
@@ -30,7 +39,7 @@ echo "==> Booting raspi4b (TCG, up to ${TIMEOUT}s)"
 qemu-system-aarch64 -M raspi4b -m 2G -smp 4 \
   -kernel "$X/kernel8.img" -initrd "$X/initramfs-linux.img" -dtb "$X/bcm2711-rpi-4-b.dtb" \
   -append "$APPEND" \
-  -drive "file=$IMG,if=sd,format=raw" \
+  -drive "file=$SD,if=sd,format=raw" \
   -display none -serial "file:$SERIAL" -serial "file:$X/serial-miniuart.log" -monitor none &
 QP=$!; trap 'kill $QP 2>/dev/null' EXIT
 deadline=$((SECONDS+TIMEOUT)); result="TIMEOUT"

@@ -1,4 +1,4 @@
-FROM menci/archlinuxarm:base-devel
+FROM docker.io/menci/archlinuxarm:base-devel
 # Docker blocks pacman's Landlock sandbox and the alpm download user.
 # DisableSandbox must land inside [options]; appending puts it in the last
 # repo section, where pacman ignores it and warns on every invocation.

@@ -45,15 +45,39 @@ fi
 
 pacman -Syu --noconfirm
 
+echo "==> Trusting Omarchy's package signing key"
+# Same bootstrap as upstream's omarchy-update-keyring: fetch the key by its
+# pinned fingerprint, locally sign it, then let omarchy-keyring own it.
+OMARCHY_KEY=40DFB630FF42BCFFB047046CF0134EE680CAC571
+pacman-key --init >/dev/null 2>&1 || true
+pacman-key --populate archlinuxarm >/dev/null 2>&1 || true
+pacman-key --recv-keys "$OMARCHY_KEY" --keyserver keys.openpgp.org
+pacman-key --lsign-key "$OMARCHY_KEY"
+pacman -S --noconfirm --needed omarchy-keyring
+
 echo "==> Installing kernel and base system"
 pacman -S --noconfirm --needed \
   base "$KERNEL" linux-firmware systemd sudo openssh networkmanager \
   git base-devel vim e2fsprogs util-linux gptfdisk
 
+echo "==> Installing the omarchy package"
+# Omarchy 4 ships as a pacman package installing to /usr/share/omarchy; it is
+# not a git checkout. It comes from upstream's aarch64 edge tree, unless a
+# local rebuild in [omarchy-pi] overrides it.
+if pacman -Si omarchy >/dev/null 2>&1; then
+  pacman -S --noconfirm --needed omarchy || echo "WARN: omarchy package failed to install"
+else
+  echo "WARN: no omarchy package in any repo -- desktop will not be configured"
+fi
+
 echo "==> Installing Omarchy packages available for aarch64"
-# Packages upstream lists that have no aarch64 build are handled by
-# omarchy-pi's patch set; anything still missing is reported, not fatal.
-mapfile -t WANT < <(grep -hv '^#' /omarchy/install/omarchy-base.packages | grep -v '^$')
+# The package list comes from the omarchy package just installed, so list and
+# package are always the same release. A mounted source checkout (/omarchy)
+# overrides it for local-source builds. Anything without an aarch64 build is
+# reported, not fatal.
+BASE_LIST=/usr/share/omarchy/install/omarchy-base.packages
+[ -f /omarchy/install/omarchy-base.packages ] && BASE_LIST=/omarchy/install/omarchy-base.packages
+mapfile -t WANT < <(grep -hv '^#' "$BASE_LIST" | grep -v '^$')
 AVAIL=(); SKIP=()
 for p in "${WANT[@]}"; do
   # --print resolves `provides` too, so e.g. `nvim` is satisfied by `neovim`.
@@ -64,21 +88,50 @@ echo "    installing ${#AVAIL[@]}, unavailable ${#SKIP[@]}: ${SKIP[*]:-none}"
 printf '%s\n' "${SKIP[@]}" > /root/unavailable-packages.txt
 pacman -S --noconfirm --needed "${AVAIL[@]}" || echo "WARN: some packages failed"
 
-echo "==> Installing the omarchy package"
-# Omarchy 4 ships as a pacman package installing to /usr/share/omarchy; it is
-# not a git checkout. Ours comes from the local aarch64 repo built by
-# build-pkgs.sh (upstream publishes x86_64 only).
-if pacman -Si omarchy >/dev/null 2>&1; then
-  pacman -S --noconfirm --needed omarchy || echo "WARN: omarchy package failed to install"
-else
-  echo "WARN: no omarchy package in local repo -- desktop will not be configured"
-fi
+echo "==> Installing the Pi pacman template and refresh hook"
+# omarchy-refresh-pacman copies upstream's x86_64 config into place and then
+# runs the pre-refresh-pacman hook; ours rewrites it from this template.
+install -Dm644 /config/pacman/pacman-pi.conf /usr/share/omarchy-pi/pacman-pi.conf
+install -Dm644 /config/pacman/mirrorlist-pi  /usr/share/omarchy-pi/mirrorlist-pi
+install -Dm644 /config/hooks/pre-refresh-pacman.d/10-omarchy-pi \
+  /etc/skel/.config/omarchy/hooks/pre-refresh-pacman.d/10-omarchy-pi
 
 echo "==> Creating user $USERNAME"
 useradd -m -G wheel,video,audio,input,storage -s /bin/bash "$USERNAME" 2>/dev/null || true
 echo "$USERNAME:$USERPASS" | chpasswd
 echo "root:$USERPASS" | chpasswd
 echo '%wheel ALL=(ALL:ALL) ALL' > /etc/sudoers.d/wheel
+
+echo "==> Shimming upstream installer steps that assume x86_64"
+# Upstream's aarch64 omarchy package still carries two x86 assumptions in its
+# installer. These edits touch the installed copy only; the next package
+# upgrade restores upstream's file, which is harmless because both scripts run
+# once, at provisioning. Each shim reports when upstream has fixed the line,
+# so the list shrinks on its own.
+shim() {
+  local file=$1 match=$2 expr=$3 label=$4
+  if grep -qF -- "$match" "$file" 2>/dev/null; then
+    sed -i "$expr" "$file" && echo "    shimmed: $label"
+  else
+    echo "    no longer needed: $label (upstream changed $file)"
+  fi
+}
+OI=/usr/share/omarchy/install
+# mise-work.sh looks only for node-v*-linux-x64.tar.gz; we stage the arm64 one.
+shim "$OI/user/mise-work.sh" 'linux-x64.tar.gz' \
+  's/linux-x64\.tar\.gz/linux-arm64.tar.gz/g' "Node tarball name (x64 -> arm64)"
+# The Pi has no DMI table, so this read fails under bash -e and aborts the step.
+shim "$OI/hardware/apple/fix-spi-keyboard.sh" 'product_name 2>/dev/null)"' \
+  's#product_name 2>/dev/null)"$#product_name 2>/dev/null)" || true#' "DMI read on a board without DMI"
+# snapper.sh configures btrfs snapshots. The aarch64 omarchy package does not
+# pull in snapper (no Limine/btrfs stack here), so the step dies with 127.
+# The defect here is a missing guard, so the check is inverted.
+if [ -f "$OI/config/snapper.sh" ] && ! grep -qE 'command -v snapper|omarchy-cmd-present snapper' "$OI/config/snapper.sh"; then
+  sed -i '1s#^#command -v snapper >/dev/null || { echo "snapper not installed; skipping"; exit 0; }\n#' "$OI/config/snapper.sh" \
+    && echo "    shimmed: snapper step without snapper"
+else
+  echo "    no longer needed: snapper step without snapper (upstream changed $OI/config/snapper.sh)"
+fi
 
 echo "==> System configuration"
 ln -sf /usr/share/zoneinfo/UTC /etc/localtime
@@ -126,10 +179,11 @@ echo "==> Running Omarchy system setup"
 # run_logged traps per-script failures instead of aborting, so this completes
 # even where x86-specific steps do not apply; the log is what we grade.
 if command -v omarchy-apply-system >/dev/null 2>&1; then
-  # OMARCHY_MIRROR=pi is load-bearing: post-install/pacman.sh restores
-  # /etc/pacman.conf from default/pacman/pacman-$OMARCHY_MIRROR.conf, and the
-  # default 'stable' variant would replace our ARM config with x86 mirrors.
-  SYSTEMD_OFFLINE=1 OMARCHY_LOG_TO_STDOUT=1 OMARCHY_MIRROR=pi \
+  # post-install/pacman.sh restores /etc/pacman.conf from upstream's
+  # default/pacman/pacman-$OMARCHY_MIRROR.conf, which is x86_64-only in every
+  # channel. Nothing after it touches pacman, and the check further down puts
+  # the Pi config back; edge at least names the channel we actually use.
+  SYSTEMD_OFFLINE=1 OMARCHY_LOG_TO_STDOUT=1 OMARCHY_MIRROR=edge \
     omarchy-apply-system --install-user "$USERNAME" --first-install 2>&1 \
     | tee /root/omarchy-apply.log | grep -E "Starting:|Failed:|Completed:" || true
   echo "--- steps that failed ---"
@@ -343,7 +397,7 @@ else
 fi
 
 echo "==> Verifying pacman config survived post-install"
-if grep -q "multilib\|stable-mirror.omarchy.org" /etc/pacman.conf; then
+if grep -qE '^\[multilib\]|stable-mirror\.omarchy\.org' /etc/pacman.conf; then
   echo "    post-install restored the x86 config; reapplying the Pi variant"
   cp /config/pacman/pacman-pi.conf /etc/pacman.conf
   cp /config/pacman/mirrorlist-pi  /etc/pacman.d/mirrorlist

@@ -1,0 +1,20 @@
+# omarchy-pi: keep pacman pointed at aarch64 repos across omarchy-refresh-pacman.
+#
+# omarchy-refresh-pacman has just copied upstream's config into place. That
+# config names Omarchy's Arch mirror and [multilib], neither of which has an
+# aarch64 tree, so the pacman -Syyuu that follows this hook would fail. Swap in
+# the Pi template, keeping the channel the user asked for.
+channel=$(grep -oE 'pkgs\.omarchy\.org/(stable|rc|edge)/' /etc/pacman.conf | head -1 | cut -d/ -f2)
+channel=${channel:-edge}
+
+if [[ $channel != edge ]]; then
+  echo "omarchy-pi: the $channel channel has no aarch64 omarchy package yet; installed Omarchy packages will not update until you return to edge." >&2
+fi
+
+if sed "s#pkgs\.omarchy\.org/edge/#pkgs.omarchy.org/$channel/#" /usr/share/omarchy-pi/pacman-pi.conf | sudo tee /etc/pacman.conf >/dev/null &&
+  sudo cp -f /usr/share/omarchy-pi/mirrorlist-pi /etc/pacman.d/mirrorlist; then
+  echo "omarchy-pi: pacman set to Arch Linux ARM + Omarchy $channel (aarch64)"
+else
+  echo "omarchy-pi: could not rewrite /etc/pacman.conf; the x86_64 config is still in place. Restore it with: sudo cp /usr/share/omarchy-pi/pacman-pi.conf /etc/pacman.conf && sudo cp /usr/share/omarchy-pi/mirrorlist-pi /etc/pacman.d/mirrorlist" >&2
+  exit 1
+fi

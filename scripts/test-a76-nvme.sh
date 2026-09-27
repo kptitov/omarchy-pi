@@ -5,7 +5,7 @@
 # the A76 lacks (would surface as SIGILL). Not modelled: BCM2712, RP1, V3D.
 set -uo pipefail
 cd "$(dirname "$0")/.."
-IMG=work/out/omarchy-vm.img; X=work/pi-boot; LOG=$X/vm-a76-serial.log; ERR=$X/vm-a76-qemu.err
+IMG="${IMG:-work/out/omarchy-vm.img}"; X=work/pi-boot; mkdir -p "$X"; LOG=$X/vm-a76-serial.log; ERR=$X/vm-a76-qemu.err
 PORT=2223; TIMEOUT="${TIMEOUT:-2700}"
 [ -f "$IMG" ] || { echo "no $IMG"; exit 1; }
 dd if=/dev/zero of=$X/a76-vars.fd bs=1m count=64 status=none; : > "$LOG"

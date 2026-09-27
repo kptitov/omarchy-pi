@@ -8,6 +8,12 @@ Run [Omarchy](https://omarchy.org) — full experience, latest stable — on the
 > NVMe, and on QEMU's `raspi4b` as far as the Pi vendor kernel + SD boot chain
 > goes; **not yet tested on real Pi 5 hardware** (V3D GPU, firmware, BCM2712).
 > See [docs/PORTING.md](docs/PORTING.md).
+>
+> **`edge-aarch64` branch:** Omarchy 4.0.4 installed from upstream's own
+> aarch64 repo (`pkgs.omarchy.org/edge/aarch64`, live since September 2026),
+> with no local package builds and three self-retiring installer shims. VM and
+> Pi 5 images build under Podman; the VM boots to the Hyprland desktop.
+> [Details and results](docs/PORTING.md#edge-aarch64-installing-from-upstreams-own-aarch64-repo-2026-09-27).
 
 ![Omarchy 4.0.1 running on aarch64](docs/images/omarchy-pi-vm.png)
 

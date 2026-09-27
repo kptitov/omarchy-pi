@@ -34,11 +34,17 @@ fi
 
 # Active directives only -- the shipped config explains in comments why the
 # upstream repo is not used, and that must not read as a failure.
-if grep -vE '^\s*#' /etc/pacman.conf 2>/dev/null | grep -q 'stable-mirror\.omarchy\.org\|pkgs\.omarchy\.org'; then
+# pkgs.omarchy.org itself is expected: it publishes an aarch64 tree, and
+# omarchy/omarchy-settings are built per architecture there. What breaks a Pi
+# is Omarchy's Arch mirror or a path pinned to x86_64.
+active_conf=$(grep -vE '^\s*#' /etc/pacman.conf 2>/dev/null)
+if grep -qE 'stable-mirror\.omarchy\.org|pkgs\.omarchy\.org/[a-z]+/x86_64' <<<"$active_conf"; then
   bad "an upstream x86_64 Omarchy repo is configured" \
-      "omarchy and omarchy-settings are arch=any, so x86 builds could replace the ARM ones"
+      "neither Omarchy's Arch mirror nor its x86_64 tree has aarch64 packages"
+elif grep -qE 'pkgs\.omarchy\.org/[a-z]+/(\$arch|aarch64)' <<<"$active_conf"; then
+  ok "Omarchy repo: $(grep -oE 'pkgs\.omarchy\.org/[a-z]+' <<<"$active_conf" | head -1) (aarch64 tree)"
 else
-  ok "no upstream x86_64 repo configured"
+  ok "no upstream Omarchy repo configured"
 fi
 
 grep -q 'mirror\.archlinuxarm\.org' /etc/pacman.d/mirrorlist 2>/dev/null \

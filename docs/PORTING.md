@@ -1,5 +1,64 @@
 # Porting plan
 
+## `edge-aarch64`: installing from upstream's own aarch64 repo (2026-09-27)
+
+Upstream now publishes aarch64. `pkgs.omarchy.org/edge/aarch64` carried 152
+packages on 2026-09-27, 151 of them built in September 2026. They include
+`omarchy` 4.0.4, `omarchy-settings`, `omarchy-keyring`, Hyprland, and all 20
+packages in [packages/aarch64-rebuild.txt](../packages/aarch64-rebuild.txt).
+They are built against Arch Linux ARM (the build record shows ALARM's
+keyring and its exact glibc build) and signed with Omarchy's key: the database
+embeds no signatures, but each package has a detached `.sig`. The work comes
+from upstream's Apple Silicon effort (`omarchy-mac`, the `linux-aurora`
+kernel). The stable channel had 26 aarch64 packages and no `omarchy`, so edge
+is the only channel that installs Omarchy on ARM today.
+
+This branch installs from that repo and builds nothing:
+
+| Change | Where |
+|---|---|
+| `[omarchy]` points at `pkgs.omarchy.org/edge/$arch`; `[omarchy-pi]` stays ahead of it for local overrides and is empty by default | [pacman-pi.conf](../config/pacman/pacman-pi.conf) |
+| Omarchy's key is fetched by its pinned fingerprint and locally signed, the same bootstrap as upstream's `omarchy-update-keyring` | `build-rootfs.sh` |
+| The package list is read from the installed `omarchy` package, so list and package are always one release | `build-rootfs.sh` |
+| No Omarchy fork and no `omarchy-pkgs` checkout; `OMARCHY=` is optional | `build-all.sh` |
+| Runs under Podman as well as Docker | `build-all.sh`, `Dockerfile.alarm` |
+| `omarchy-refresh-pacman` copies upstream's x86_64 config and then runs the `pre-refresh-pacman` hook; ours rewrites it from the Pi template, keeping the requested channel | [10-omarchy-pi](../config/hooks/pre-refresh-pacman.d/10-omarchy-pi) |
+
+Three upstream installer lines still assume x86_64. They are shimmed in the
+installed copy only, just before provisioning, and each shim prints
+`no longer needed` once upstream changes the line:
+
+| Step | Defect in 4.0.4 | Shim |
+|---|---|---|
+| `install/user/mise-work.sh` | looks only for `node-v*-linux-x64.tar.gz` | match `linux-arm64` |
+| `install/hardware/apple/fix-spi-keyboard.sh` | DMI read fails under `bash -e` on a board without DMI | `\|\| true` |
+| `install/config/snapper.sh` | runs `snapper` unguarded; the aarch64 package does not depend on it | skip when absent |
+
+**Omarchy 4.0.4 aborts the whole installer at the first failing step.** The
+note below that `run_logged` traps failures and continues no longer holds. The
+first build of this branch stopped at `snapper.sh`, step 9 of 49, so
+services, firewall, hardware, login and post-install never ran and SDDM was
+left disabled. The smoke test caught it as `sddm enabled: FAIL`.
+
+### Results on this branch
+
+| Check | Result |
+|---|---|
+| Build, VM variant, Podman on an M4 Pro | 10 min with a warm package cache; rootfs 10.5 GB |
+| Base packages | 146 of 147 install; `obs-studio` has no aarch64 build |
+| Omarchy installer | 49 of 49 steps completed, 0 failed (VM and Pi variants) |
+| `smoke-test.sh` (HVF) | PASSED: SSH in 17 s, 0 failed units, SDDM running, no x86 mirrors |
+| `test-a76-nvme.sh` (TCG, Cortex-A76, root on NVMe) | SSH in 42 s, root `nvme0n1p2`, 25 binaries run, 0 illegal-instruction faults. `omacalc`/`omawrite` abort with no display, as before |
+| Desktop (HVF + `virtio-gpu`, 1920x1080) | SDDM autologin; Hyprland 0.56.2 and quickshell running in a seat0 session; [screenshot](images/omarchy-4.0.4-edge-aarch64.png) |
+| `pre-refresh-pacman` hook | from upstream's `edge` and `stable` configs: `[multilib]` removed, ALARM mirrors restored, channel kept; `pacman -Sy` then syncs all 6 databases |
+| `omarchy-pi-doctor` | on the booted VM: 12 passed, 1 failed, the failure being its repo check flagging `pkgs.omarchy.org/edge/$arch` as x86. The rewritten check classifies 3 sample configs correctly; it has not been re-run on a booted image |
+| `test-raspi4b.sh` (Pi variant, TCG, SD) | `linux-rpi` kernel booted and the initramfs mounted root by PARTUUID from the SD card (root superblock: mount count 0 to 1, last mounted on `/sysroot`). No writes after that and no journal within 900 s, so nothing past the root mount is proven here; the serial console stays dark as documented below |
+| Pi 5 image | builds: `kernel8.img`, 0 failed installer steps, 14 GB. Not booted on hardware |
+
+A Podman machine does not return a build's scratch space to macOS. Four builds
+grew its disk to 89 GB and filled the host; `build-all.sh` now deletes
+`work/rootfs.tar` and runs `fstrim` in the machine after every build.
+
 ## Phases
 
 | # | Phase | Status |
