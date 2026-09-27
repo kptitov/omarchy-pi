@@ -55,6 +55,23 @@ left disabled. The smoke test caught it as `sddm enabled: FAIL`.
 | `test-raspi4b.sh` (Pi variant, TCG, SD) | `linux-rpi` kernel booted and the initramfs mounted root by PARTUUID from the SD card (root superblock: mount count 0 to 1, last mounted on `/sysroot`). No writes after that and no journal within 900 s, so nothing past the root mount is proven here; the serial console stays dark as documented below |
 | Pi 5 image | builds: `kernel8.img`, 0 failed installer steps, 14 GB. Not booted on hardware |
 
+### First boot on real hardware (2026-09-27)
+
+Raspberry Pi 5 Model B Rev 1.1, 8 GB, official-style `pwmfan` cooler, booted
+from a 57.7 GB microSD written from this branch's `VARIANT=pi ALLOW_SSH=1`
+image. Samsung LC49G95T on HDMI-A-1.
+
+| Check | Result |
+|---|---|
+| Boot | firmware -> `linux-rpi` 6.18.53 -> SDDM autologin -> Hyprland, 0 failed units; root grew to 52.3 GB on first boot |
+| GPU | compositing on V3D: Hyprland's `v3d` DRM clients show 1.71 s render-engine time and 118 MB resident; no software-render variables in its environment. GLES 3.0 context (3.2 is refused with `EGL_BAD_MATCH`, Hyprland falls back) |
+| Display | `vc4-kms-v3d-pi5`; HDMI-A-1 at 3840x1080@60 by default, 5120x1440@59.98 offered |
+| Thermals, 90 s on 4 cores | peak 61.1 C, CPU held 2,400 MHz throughout; fan 1,754 -> 3,943 rpm, back to 48.5 C 30 s after |
+| Network | Ethernet and Wi-Fi (5 GHz, 433 Mbit/s); `omarchy-pi.local` resolves over mDNS |
+| `omarchy-pi-doctor` | 13 passed, 0 failed |
+| Clock | **came up 2 d 19 h slow with NTP off**: the image enabled no time sync and the RTC has no battery. Fixed on the device with `timedatectl set-ntp true`; `build-rootfs.sh` now enables `systemd-timesyncd` and `fstrim.timer` |
+| Wi-Fi country | unset (`00`), which leaves 5 GHz DFS channels listen-only. Set to `AT` by hand in `/etc/conf.d/wireless-regdom`; not yet in the build |
+
 A Podman machine does not return a build's scratch space to macOS. Four builds
 grew its disk to 89 GB and filled the host; `build-all.sh` now deletes
 `work/rootfs.tar` and runs `fstrim` in the machine after every build.
@@ -67,7 +84,7 @@ grew its disk to 89 GB and filled the host; `build-all.sh` now deletes
 | 2 | Determine package availability and rebuild what upstream ships x86_64-only | done — 23 built, see below |
 | 3 | Build a bootable VM image and run Omarchy's own installer on ARM | done — 4.0.2, zero failed steps |
 | 3b | Verify the Pi boot chain as far as emulation allows (see below) | done |
-| 4 | Verify on real Pi 5 hardware (V3D GPU, firmware boot, thermals) | not started — needs a Pi |
+| 4 | Verify on real Pi 5 hardware (V3D GPU, firmware boot, thermals) | done on `edge-aarch64`, 2026-09-27 — see [first boot](#first-boot-on-real-hardware-2026-09-27) |
 | 5 | Automated image releases via CI | scaffolded ([workflow](../.github/workflows/build-image.yml)) |
 | 6 | Host an aarch64 pacman repo so installed systems get package updates | not started |
 

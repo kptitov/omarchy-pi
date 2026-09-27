@@ -150,8 +150,13 @@ FSTAB
 
 # Services. systemctl can't talk to a live systemd inside the container, so
 # enable offline by creating the symlinks systemd would.
+#
+# systemd-timesyncd: the Pi 5's RTC keeps no time without a battery, and the
+# first hardware boot (2026-09-27) came up 2 days 19 h slow with NTP off --
+# enough to break pacman's signature checks. fstrim.timer: SD cards and NVMe
+# both honour discard, and nothing else trims them.
 export SYSTEMD_OFFLINE=1
-for svc in NetworkManager sshd; do
+for svc in NetworkManager sshd systemd-timesyncd fstrim.timer; do
   systemctl enable "$svc" 2>/dev/null || echo "WARN: could not enable $svc"
 done
 
